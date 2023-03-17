@@ -1,78 +1,78 @@
 package com.example.integration;
 
-import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
+import org.springframework.integration.channel.DirectChannel;
 import org.springframework.integration.core.GenericHandler;
 import org.springframework.integration.core.GenericTransformer;
-import org.springframework.integration.core.MessageSource;
 import org.springframework.integration.dsl.IntegrationFlow;
 import org.springframework.integration.dsl.MessageChannels;
-import org.springframework.integration.dsl.context.IntegrationFlowContext;
-import org.springframework.messaging.Message;
+import org.springframework.integration.file.dsl.Files;
+import org.springframework.integration.file.transformer.FileToStringTransformer;
 import org.springframework.messaging.MessageChannel;
-import org.springframework.messaging.support.MessageBuilder;
-import org.springframework.stereotype.Component;
+import org.springframework.util.SystemPropertyUtils;
 
-import java.time.Instant;
-import java.util.Set;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
+import java.io.File;
 import java.util.concurrent.TimeUnit;
 
 @SpringBootApplication
 public class IntegrationApplication {
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         SpringApplication.run(IntegrationApplication.class, args);
+        Thread.currentThread().join();
     }
 
     @Bean
-    MessageChannel greetings() {
+    MessageChannel requests() {
         return MessageChannels.direct().get();
     }
 
-    private static String text() {
-        return Math.random() > .5 ?
-                "Hello world @ " + Instant.now() + "!" :
-                "hola todo el mundo @ " + Instant.now() + "!";
+    @Bean
+    DirectChannel replies() {
+        return MessageChannels.direct().get();
     }
 
-
-    @Component
-    static class MyMessagSource implements MessageSource<String> {
-
-        // poller
-        @Override
-        public Message<String> receive() {
-            return MessageBuilder.withPayload(text()).build();
-        }
-    }
 
     @Bean
-    ApplicationRunner runner(MyMessagSource myMessagSource, IntegrationFlowContext context) {
-        return args -> {
-            var holaFlow = buildFlow(myMessagSource, 1, "hola");
-            var helloFlow = buildFlow(myMessagSource, 2, "Hello");
-            Set.of(helloFlow, holaFlow).forEach(flow -> context.registration(flow).register().start());
-        };
-    }
-
-    private static IntegrationFlow buildFlow(MyMessagSource myMessagSource, int seconds, String filterText) {
+    IntegrationFlow inboundFlow() {
+        var directory = new File(SystemPropertyUtils.resolvePlaceholders("${HOME}/Desktop/in"));
+        var files = Files.inboundAdapter(directory).autoCreateDirectory(true);
         return IntegrationFlow
-                .from(myMessagSource, p -> p.poller(pf -> pf.fixedRate(seconds, TimeUnit.SECONDS)))
-                .filter(String.class, source -> source.contains(filterText))
-                .transform((GenericTransformer<String, String>) String::toUpperCase)
+                .from(files, poller -> poller.poller(pm -> pm.fixedRate(1, TimeUnit.SECONDS)))
+                .transform(new FileToStringTransformer())
                 .handle((GenericHandler<String>) (payload, headers) -> {
-                    System.out.println("the payload is for filter text [" + filterText+
-                                       "] is " + payload);
-                    return null;
+                    System.out.println("start of the line");
+                    headers.forEach((key, value) -> System.out.println(key + '=' + value));
+                    return payload;
                 })
+                .channel(requests())
                 .get();
     }
 
+    @Bean
+    IntegrationFlow flow() {
+        return IntegrationFlow
+                .from(requests())
+                .filter(String.class, source -> source.contains("hola"))
+                .transform((GenericTransformer<String, String>) String::toUpperCase)
+                .channel(replies())
+                .get();
+    }
+
+    @Bean
+    IntegrationFlow outboundFlow() {
+        var directory = new File(SystemPropertyUtils.resolvePlaceholders("${HOME}/Desktop/out"));
+        return IntegrationFlow
+                .from(replies())
+                .handle((GenericHandler<String>) (payload, headers) -> {
+                    System.out.println("end of the line");
+                    headers.forEach((key, value) -> System.out.println(key + '=' + value));
+                    return payload;
+                })
+                .handle(Files.outboundAdapter(directory).autoCreateDirectory(true))
+                .get();
+    }
 
 }
-
-
