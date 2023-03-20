@@ -1,18 +1,21 @@
 package com.example.integration;
 
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.integration.core.GenericHandler;
 import org.springframework.integration.dsl.IntegrationFlow;
 import org.springframework.integration.dsl.MessageChannels;
-import org.springframework.integration.file.dsl.Files;
-import org.springframework.integration.file.transformer.FileToStringTransformer;
 import org.springframework.messaging.MessageChannel;
-import org.springframework.util.SystemPropertyUtils;
+import org.springframework.messaging.MessageHeaders;
+import org.springframework.messaging.support.MessageBuilder;
 
-import java.io.File;
-import java.util.concurrent.TimeUnit;
+import java.util.Collection;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 
 
 @SpringBootApplication
@@ -23,22 +26,31 @@ public class IntegrationApplication {
         Thread.currentThread().join();
     }
 
+    private final Map<Integer, Order> ordersDb = new ConcurrentHashMap<>();
+
     @Bean
-    MessageChannel errorChannel() {
+    ApplicationRunner runner(MessageChannel orders) {
+        return event -> {
+            var payload = new Order(1, Set.of(new LineItem("1"), new LineItem("2"), new LineItem("3")));
+            this.ordersDb.put(payload.id(), payload);
+            var orderMessage = MessageBuilder.withPayload(payload)
+                    .setHeader("orderId", payload.id())
+                    .build();
+            orders.send(orderMessage);
+        };
+    }
+
+    @Bean
+    MessageChannel loggingChannel() {
         return MessageChannels.direct().get();
     }
 
     @Bean
-    MessageChannel errorChannelForLetterViolations() {
-        return MessageChannels.direct().get();
-    }
-
-    @Bean
-    IntegrationFlow errorFlow() {
+    IntegrationFlow loggingFlow() {
         return IntegrationFlow
-                .from(errorChannel())
+                .from(loggingChannel())
                 .handle((payload, headers) -> {
-                    System.out.println("inside errorFlow " + payload);
+                    System.out.println("tapping " + payload);
                     headers.forEach((k, v) -> System.out.println(k + '=' + v));
                     return null;
                 })
@@ -46,76 +58,30 @@ public class IntegrationApplication {
     }
 
     @Bean
-    IntegrationFlow errorForLetterViolationsFlow() {
+    IntegrationFlow etailerFlow() {
+
         return IntegrationFlow
-                .from(errorChannelForLetterViolations())
+                .from(orders())
+                .split((Function<Order, Collection<LineItem>>) Order::lineItems)
+                .wireTap(loggingChannel())
+                .aggregate()
                 .handle((payload, headers) -> {
-                    System.out.println("inside errorForLetterViolationsFlow " + payload);
-                    headers.forEach((k, v) -> System.out.println(k + '=' + v));
+                    System.out.println("after the aggregation: " + payload);
                     return null;
                 })
                 .get();
+
     }
 
     @Bean
-    MessageChannel uppercaseIn() {
+    MessageChannel orders() {
         return MessageChannels.direct().get();
     }
 
-    @Bean
-    MessageChannel uppercaseOut() {
-        return MessageChannels.direct().get();
-    }
+}
 
+record Order(Integer id, Set<LineItem> lineItems) {
+}
 
-    @Bean
-    IntegrationFlow inboundFlow() {
-        var directory = new File(SystemPropertyUtils.resolvePlaceholders("${HOME}/Desktop/in"));
-        var files = Files.inboundAdapter(directory).autoCreateDirectory(true);
-        return IntegrationFlow
-                .from(files, poller -> poller.poller(pm -> pm.fixedRate(1, TimeUnit.SECONDS)))
-                .transform(new FileToStringTransformer())
-                .handle((GenericHandler<String>) (payload, headers) -> {
-                    headers.forEach((key, value) -> System.out.println(key + '=' + value));
-                    if (true)
-                        throw new IllegalArgumentException("you screwed something up!")  ;
-                    return payload;
-                })
-                .channel(uppercaseIn())
-                .get();
-    }
-
-    @Bean
-    IntegrationFlow uppercaseFlow() {
-        return IntegrationFlow
-                .from(uppercaseIn())
-                .enrichHeaders(b -> b.errorChannel(errorChannelForLetterViolations()))
-                .handle((GenericHandler<String>) (payload, headers) -> {
-                    var good = false;
-                    for (var c : payload.toCharArray())
-                        if (Character.isLetter(c))
-                            good = true;
-                    if (!good) throw new IllegalArgumentException("you must provide some letters!");
-                    return payload;
-                })
-                .handle((GenericHandler<String>) (payload, headers) -> payload.toUpperCase())
-                .channel(uppercaseOut())
-                .get();
-    }
-
-
-    @Bean
-    IntegrationFlow outboundFlow() {
-        var directory = new File(SystemPropertyUtils.resolvePlaceholders("${HOME}/Desktop/out"));
-        return IntegrationFlow
-                .from(uppercaseOut())
-                .handle((GenericHandler<String>) (payload, headers) -> {
-                    System.out.println("end of the line");
-                    headers.forEach((key, value) -> System.out.println(key + '=' + value));
-                    return payload;
-                })
-                .handle(Files.outboundAdapter(directory).autoCreateDirectory(true))
-                .get();
-    }
-
+record LineItem(String sku) {
 }
