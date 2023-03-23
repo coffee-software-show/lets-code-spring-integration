@@ -6,18 +6,11 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.integration.core.GenericHandler;
-import org.springframework.integration.core.GenericSelector;
 import org.springframework.integration.dsl.IntegrationFlow;
-import org.springframework.integration.file.dsl.Files;
-import org.springframework.integration.file.filters.AcceptOnceFileListFilter;
-import org.springframework.integration.file.filters.CompositeFileListFilter;
-import org.springframework.integration.file.filters.FileListFilter;
-import org.springframework.integration.file.filters.IgnoreHiddenFileListFilter;
-import org.springframework.integration.file.support.FileExistsMode;
+import org.springframework.integration.ftp.dsl.Ftp;
+import org.springframework.integration.ftp.session.DefaultFtpSessionFactory;
 
 import java.io.File;
-import java.util.Set;
-import java.util.stream.Stream;
 
 @Slf4j
 @SpringBootApplication
@@ -28,22 +21,33 @@ public class FtpIntegrationApplication {
     }
 
     @Bean
+    DefaultFtpSessionFactory defaultFtpSessionFactory() {
+        var ftpSessionFactory = new DefaultFtpSessionFactory();
+        ftpSessionFactory.setHost("localhost");
+        ftpSessionFactory.setPassword("pw");
+        ftpSessionFactory.setUsername("jlong");
+        return ftpSessionFactory;
+    }
+
+    @Bean
     IntegrationFlow inboundFileFlow(
-            @Value("${HOME}/Desktop/in") File in,
-            @Value("${HOME}/Desktop/out") File out
+            @Value("${HOME}/Desktop/ftp-client-integration/local") File ftpLocal,
+            @Value("${HOME}/Desktop/ftp-client-integration/out") File out,
+            DefaultFtpSessionFactory ftpSessionFactory
     ) {
-        var inbound = Files
-                .inboundAdapter(in)
-                .autoCreateDirectory(true)
+        var inbound = Ftp
+                .inboundAdapter(ftpSessionFactory)
+                .autoCreateLocalDirectory(true)
+                .localDirectory(ftpLocal)
+                .deleteRemoteFiles(true)
                 .get();
-        var outbound = Files.outboundAdapter(out)
+        var outbound = Ftp
+                .outboundAdapter(ftpSessionFactory)
                 .autoCreateDirectory(true)
+                .temporaryRemoteDirectory("temp") // warning: make sure to create the remote directories yourself!
+                .remoteDirectory("processed")
                 .fileNameGenerator(message -> Long.toString(System.currentTimeMillis()))
-                .fileExistsMode(FileExistsMode.FAIL)
-                .deleteSourceFiles(true)
                 .get();
-
-
         return IntegrationFlow
                 .from(inbound)
                 .filter(File.class, source -> source.isFile() && source.getName().endsWith(".csv"))
