@@ -6,8 +6,10 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.integration.core.GenericHandler;
 import org.springframework.integration.dsl.IntegrationFlow;
 import org.springframework.integration.jdbc.JdbcMessageHandler;
+import org.springframework.integration.jdbc.JdbcOutboundGateway;
 import org.springframework.integration.jdbc.JdbcPollingChannelAdapter;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.messaging.MessageHeaders;
 import org.springframework.stereotype.Component;
 
 import javax.sql.DataSource;
@@ -23,8 +25,8 @@ public class SimpleDbIntegrationApplication {
     }
 
     @Bean
-    JdbcPollingChannelAdapter jdbcPollingChannelAdapter(CustomerRowMapper customerRowMapper,
-                                                        DataSource dataSource) {
+    JdbcPollingChannelAdapter inbound(CustomerRowMapper customerRowMapper,
+                                      DataSource dataSource) {
         var jdbc = new JdbcPollingChannelAdapter(dataSource, "select * from CUSTOMER where processed = false");
         jdbc.setRowMapper(customerRowMapper);
       /*  jdbc.setUpdateSql("update customer set processed = true where id =  :id ");
@@ -40,7 +42,7 @@ public class SimpleDbIntegrationApplication {
     }
 
     @Bean
-    JdbcMessageHandler jdbcMessageHandler(DataSource dataSource) {
+    JdbcMessageHandler outbound(DataSource dataSource) {
         var update = new JdbcMessageHandler(dataSource, "update customer set processed = true where id = ?");
         update.setPreparedStatementSetter((ps, requestMessage) -> {
             var customer = (Customer) requestMessage.getPayload();
@@ -52,19 +54,38 @@ public class SimpleDbIntegrationApplication {
     }
 
     @Bean
+    JdbcOutboundGateway gateway(DataSource dataSource) {
+        var sql = """
+                update customer set processed = true where id = ?
+                """;
+        var jdbc = new JdbcOutboundGateway(dataSource, sql);
+        jdbc.setRequestPreparedStatementSetter((ps, requestMessage) -> {
+            var customer = (Customer) requestMessage.getPayload();
+            ps.setInt(1, customer.id());
+            ps.execute();
+        });
+        jdbc.setKeysGenerated(true);
+        return jdbc;
+    }
+
+    @Bean
     IntegrationFlow jdbcInboundFlow(JdbcPollingChannelAdapter inbound,
-                                    JdbcMessageHandler outbound) {
+//                                    JdbcMessageHandler outbound,
+                                    JdbcOutboundGateway gateway) {
         return IntegrationFlow
                 .from(inbound, poller -> poller.poller(pm -> pm.fixedRate(1, TimeUnit.SECONDS)))
                 .split()
                 .handle((GenericHandler<Customer>) (payload, headers) -> {
-                    System.out.println("-------");
-                    System.out.println(payload);
-                    headers.forEach((k, v) -> System.out.println(k + '=' + v));
+                    System.out.println("before the gateway: " + payload);
                     return payload;
                 })
-                .aggregate()
-                .handle(outbound)
+                .handle(gateway)
+                .handle((payload, headers) -> {
+                    System.out.println("----------------");
+                    System.out.println(payload);
+                    headers.forEach((k, v) -> System.out.println(k + '=' + v));
+                    return null;
+                })
                 .get();
     }
 }
