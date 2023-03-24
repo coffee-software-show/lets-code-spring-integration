@@ -7,13 +7,10 @@ import org.springframework.integration.core.GenericHandler;
 import org.springframework.integration.dsl.IntegrationFlow;
 import org.springframework.integration.jdbc.JdbcMessageHandler;
 import org.springframework.integration.jdbc.JdbcPollingChannelAdapter;
-import org.springframework.integration.jdbc.MessagePreparedStatementSetter;
 import org.springframework.jdbc.core.RowMapper;
-import org.springframework.messaging.Message;
 import org.springframework.stereotype.Component;
 
 import javax.sql.DataSource;
-import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.concurrent.TimeUnit;
@@ -49,14 +46,14 @@ public class SimpleDbIntegrationApplication {
             var customer = (Customer) requestMessage.getPayload();
             ps.setInt(1, customer.id());
             ps.execute();
+
         });
         return update;
     }
 
     @Bean
     IntegrationFlow jdbcInboundFlow(JdbcPollingChannelAdapter inbound,
-                                    JdbcMessageHandler  outbound
-    ) {
+                                    JdbcMessageHandler outbound) {
         return IntegrationFlow
                 .from(inbound, poller -> poller.poller(pm -> pm.fixedRate(1, TimeUnit.SECONDS)))
                 .split()
@@ -66,6 +63,7 @@ public class SimpleDbIntegrationApplication {
                     headers.forEach((k, v) -> System.out.println(k + '=' + v));
                     return payload;
                 })
+                .aggregate()
                 .handle(outbound)
                 .get();
     }
