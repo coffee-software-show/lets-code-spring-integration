@@ -6,7 +6,6 @@ import org.springframework.amqp.core.*;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.beans.factory.InitializingBean;
-import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -14,15 +13,12 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.MediaType;
 import org.springframework.integration.amqp.dsl.Amqp;
-import org.springframework.integration.amqp.dsl.RabbitStream;
-import org.springframework.integration.core.GenericHandler;
 import org.springframework.integration.dsl.IntegrationFlow;
 import org.springframework.integration.dsl.MessageChannels;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.MessageHeaders;
 import org.springframework.messaging.handler.annotation.Headers;
 import org.springframework.messaging.handler.annotation.Payload;
-import org.springframework.rabbit.stream.producer.RabbitStreamTemplate;
 
 import java.util.Map;
 import java.util.Set;
@@ -91,8 +87,8 @@ class RabbitIntegrationConfiguration {
     @Bean
     IntegrationFlow inboundRabbitIntegrationFlow(ConnectionFactory connectionFactory) {
         return IntegrationFlow
-                .from(Amqp.inboundAdapter(connectionFactory, INTEGRATION_REQUESTS_NAME).get())
-                .handle((GenericHandler<Map<String, String>>) (payload, headers) -> {
+                .from(Amqp.inboundAdapter(connectionFactory, INTEGRATION_REQUESTS_NAME))
+                .handle((payload, headers) -> {
                     dump(payload, headers);
                     return null;
                 })
