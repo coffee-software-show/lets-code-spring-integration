@@ -31,7 +31,6 @@ public class RabbitmqBasicsApplication {
 
     public static void main(String[] args) throws Exception {
         SpringApplication.run(RabbitmqBasicsApplication.class, args);
-        Thread.currentThread().join();
     }
 
     final static String BASIC_REQUESTS_NAME = "basic-requests";
@@ -74,7 +73,8 @@ class RabbitConfiguration {
     }
 
     @RabbitListener(queues = BASIC_REQUESTS_NAME)
-    public void basicsConsumer(@Headers Map<String, Object> headers, @Payload Message payload) throws Exception {
+    public void basicsConsumer(@Headers Map<String, Object> headers, @Payload Message payload)
+            throws Exception {
         var map = this.objectMapper.readValue(payload.getBody(), this.typeReference);
         dump(map, headers);
     }
